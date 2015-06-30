@@ -1,0 +1,240 @@
+---
+title: "Predict the Survival on the Titanic"
+author: "Liu Chaoran"
+date: "11 June 2015"
+output:
+  html_document: default
+---
+         
+##Ojectives:
+Given some incompleted passenger information:   
+1. Find out what sorts of people were likely to survive.  
+2. Predict which passengers survived the tragedy.   
+```{r include=FALSE}
+setwd("~/Dropbox/kaggle/titanic")
+train<-read.csv('train.csv',na.strings=c('NA',''),stringsAsFactors=F)
+test<-read.csv('test.csv',na.strings=c('NA',''),stringsAsFactors=F)
+```
+##Description of Data:                                  
+**Survival: **     Survival (0 = No; 1 = Yes)                      
+**Pclass: **      Passenger Class   (1 = 1st; 2 = 2nd; 3 = 3rd)     
+**Name: **        Name                                            
+**Sex: **        Sex                                             
+**Age: **        Age                                                                    
+**Sibsp: **     Number of Siblings/Spouses Aboard               
+**Parch: **       Number of Parents/Children Aboard               
+**Ticket: **     Ticket Number                                   
+**Fare: **       Passenger Fare                                  
+**Cabin: **      Cabin                                           
+**Embarked: **    Port of Embarkation                             
+   
+
+```{r include=FALSE}
+library(Amelia)
+library(rpart)
+library(randomForest)
+library(party)
+library(ggplot2)
+library(rattle)
+```
+```{r}
+summary(train)
+```
+   
+##Intuition:
+1. Female and Children are likely to have piority to board the lifeboat.   
+2. Rich/Noble poeple may have some previlege.   
+3. Big family may have difficulty to gather all family members to evacuate.      
+   
+##Approach:
+1. Exploratory Data Analysis   
+2. Feature Creation   
+3. Deal with Incomplete Data   
+4. Apply Machine Learning Models   
+5. Findings   
+
+   
+##Exploratory Data Analysis:   
+###1. Effect on Age   
+Passenger Age distribution is close to normal distribution.   
+Children (<12 years old) have bigger change to survive.   
+```{r}
+ggplot(subset(train,Age!=is.na(Age)),aes(x=Age,fill=factor(Survived)))+geom_density(alpha=0.6)+labs(title='Passenger Age Distribution')
+```
+   
+###2. Effect on Fare    
+Fare has a skewed distribution, majority has the Fare < $50.    
+There is higher change of perishing, for those with Fare < $20.   
+```{r}
+ggplot(train,aes(x=Fare,fill=factor(Survived)))+geom_density(alpha=0.6,na.rm=TRUE)+labs(title='Ticket Fare Distribution')
+```
+   
+###3. Effect on Pclass   
+Higher Passenger class implies higher surival rate.   
+   
+###4. Effect on Sex   
+Female has higher survival rate.    
+
+```{r}
+byPclass<-aggregate(Survived~Pclass,train,mean)
+bySex<-aggregate(Survived~Sex,train,mean)
+par(mfrow=c(1,2))
+barplot(byPclass$Survived,names.arg=byPclass$Pclass,col='red',main='Survival rate by Pclass')
+barplot(bySex$Survived,names.arg=bySex$Sex,col='blue',main='Survival rate by Sex')
+```
+   
+##Binding train/test Data for Pre-Processing
+```{r}
+train$Cat<-'train'
+test$Cat<-'test'
+test$Survived<-NA
+full<-rbind(train,test)
+```
+    
+##Feature Creation:     
+###1. Extract Title from Name    
+Passenger Names are in format of Surname, Title. Firstname   
+```{r}
+full$Name[1]
+```
+Split the text to get Title   
+```{r}
+full$Title<-sapply(full$Name,function(x) strsplit(x,'[.,]')[[1]][2])
+full$Title<-gsub(' ','',full$Title)
+table(full$Title)
+```
+Aggregate some less frequent Titles      
+```{r}
+full$Title[full$Title %in% c('Capt', 'Don', 'Major','Jonkheer')] <- 'Sir'
+full$Title[full$Title %in% c('Dona','the Countess' )] <- 'Lady'
+full$Title[full$Title %in% c('Mlle','Mme','Ms')] <- 'Miss'
+```
+###2. Adding FamilySize   
+FamilySie = Parch (No.of Parents/Children) + SibSp (No. of Sibling/Spouse)+1   
+```{r}
+full$FamilySize<-full$Parch+full$SibSp+1
+```
+###3. Adding Mother
+characterize mother as female who are older than 18 years old and travelled with child    
+```{r}
+full$Mother<-0
+full$Mother[full$Sex=='female' & full$Parch>0 & full$Age>18 & full$Title!='Miss']<-1
+```
+###4. Adding Child   
+characterize child as who are not older than 12 years old    
+```{r}
+full$Child<-0
+full$Child[full$Parch>0 & full$Age<=12]<-1
+```
+   
+##Deal with Missing Data:   
+###checking the missing data   
+```{r,warning=FALSE}
+library(Amelia)
+missmap(train,col=c('yellow','black'),main='Titanic Train Data',legend=F,y.labels=NULL,y.at=NULL)
+```  
+   
+Cabin, Age, and Embarked are identified with missing values.   
+   
+###1. Embarked    
+Only two Embarked are missing, simply assign them to the majority.   
+```{r}
+table(full$Embarked)
+full$Embarked[is.na(full$Embarked)]<-'S'
+```
+   
+```{r,include=FALSE}
+full$Fare[is.na(full$Fare)]<-median(full$Fare,na.rm=T)
+```
+   
+###2. Age   
+~30% is missing, using decision tree (regression) method to predict missing Age data
+```{r}
+library(rpart)
+fit.Age<-rpart(Age~Pclass+Title+Sex+SibSp+Parch+Fare,data=subset(full,Age!=is.na(Age)),method='anova')
+full$Age[is.na(full$Age)]<-predict(fit.Age,full[is.na(full$Age),])
+```
+   
+###3. Cabin
+Over 70% is missing, predicting cabin here may be inappropiate.    
+Hence cabin information is ignored at this stage of analysis.   
+```{r,echo=FALSE}
+full<-transform(full,
+                Pclass=factor(Pclass),
+                Sex=factor(Sex),
+                Embarked=factor(Embarked),
+                Title=factor(Title),
+                Mother=factor(Mother),
+                Child=factor(Child)
+)
+```
+
+##Split into train/test data   
+```{r}
+train<-full[full$Cat=='train',]
+test<-full[full$Cat=='test',]
+train$Survived<-factor(train$Survived)
+#levels(train$Survived)<-c('Perished','Survived')
+```
+##Apply Mahcine Learning Models:   
+To evaluate different models, 10 folds repeated cv is used.   
+Selection metrics is accuracy.   
+```{r}
+library(caret)
+control=trainControl(method='repeatedcv',number=10,repeats=10)
+```
+###Bayesian Logisitic Regression   
+```{r}
+set.seed(99)
+fit.bl<-train(Survived~FamilySize+Pclass+Sex+Age+SibSp+Parch+Fare+Embarked+Title+Mother+Child,data=train,method='bayesglm',trControl=control,family=binomial(link='logit'))
+```
+###Decision Tree   
+```{r}
+set.seed(99)
+fit.rp<-train(Survived~FamilySize+Pclass+Sex+Age+SibSp+Parch+Fare+Embarked+Title+Mother+Child,data=train,method='rpart',trControl=control)
+```
+###Random Forest   
+```{r}
+set.seed(99)
+fit.rf<-train(Survived~FamilySize+Pclass+Sex+Age+SibSp+Parch+Fare+Embarked+Title+Mother+Child,data=train,method='rf',trControl=control)
+```
+###Neural Network   
+```{r}
+set.seed(99)
+fit.nnet<-train(Survived~FamilySize+Pclass+Sex+Age+SibSp+Parch+Fare+Embarked+Title+Mother+Child,data=train,method='nnet',trControl=control,maxit=1000,trace=F,tuneGrid=grid.nnet)
+```
+
+##Compare the Prediction:   
+Nerual Network is the best in terms of accuracy with 10 folds cross validation.
+```{r}
+acc.bl<-paste0(round(max(fit.bl$results$Accuracy),4)*100,'%')
+acc.rp<-paste0(round(max(fit.rp$results$Accuracy),4)*100,"%")
+acc.rf<-paste0(round(max(fit.rf$results$Accuracy),4)*100,"%")
+acc.nnet<-paste0(round(max(fit.nnet$results$Accuracy),4)*100,'%')
+```
+List the accuracy for different models:   
+Bayesian Logistic Regression: `r acc.bl`   
+Decision Tree: `r acc.rp`   
+Random Frost: `r acc.rf`   
+Neural Network: `r acc.nnet`   
+   
+##Write submission using Neural Network:   
+```{r}
+test$Survived<-predict(fit.nnet,test)
+submission<-test[,1:2]
+write.csv(submission,'submission.csv',row.names=F)
+```
+   
+##Findings:   
+**The most likely to survive on the Titanic are:**    
+Pclass 1 & 2 female and children. (95% survived)   
+**The most unlikely to survive on the Titanic are:**    
+Pclass 3 female/children with family size bigger than 4. (only 9% survived)    
+```{r}
+library(rpart)
+fit.rpart<-rpart(Survived~FamilySize+Pclass+Sex+Age+SibSp+Parch+Fare+Embarked+Title+Mother+Child,data=train,control=rpart.control(cp=0.01))
+library(rattle)
+fancyRpartPlot(fit.rpart,main='Decision Tree of Survival on the Titanic',cex=0.8)
+```
+
+
