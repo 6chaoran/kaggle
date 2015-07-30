@@ -2,6 +2,6 @@
 this is the place where I put kaggle scripts and some reports.   
 Thanks viewing.   
    
-Completed:
+Completed:    
 1. Titanic   
 2. Digit Recognizer   
