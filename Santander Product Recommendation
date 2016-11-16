@@ -1,0 +1,109 @@
+setwd("~/Downloads/Santander Product Recommendation")
+rm(list=ls())
+gc()
+
+library(dplyr)
+library(data.table)
+
+na.strings <- c("NA",""," ")
+df <- fread("train_ver2_10pct_sample.csv",na.strings = na.strings)
+
+col_name <- c("modified_date",
+              "user_id",
+              "user_employmenttype",
+              "user_country",
+              "user_sex",
+              "user_age",
+              "user_bankdate",
+              "user_newuser",
+              "user_seniority",
+              "user_firstprimary",
+              "user_primarydate",
+              "user_type",
+              "user_relationtype",
+              "user_residnce",
+              "user_foreigner",
+              "user_spouse",
+              "user_channel",
+              "user_decease",
+              "user_addtype",
+              "user_addprovincecode",
+              "user_addprovincename",
+              "user_active",
+              "user_income",
+              "user_segmentation",
+              "prod_saving",
+              "prod_guarantees",
+              "prod_current",
+              "prod_derivada",
+              "prod_payrollacc",
+              "prod_junioracc",
+              "prod_masparticular",
+              "prod_particular",
+              "prod_particularplus",
+              "prod_shortterm",
+              "prod_mediumterm",
+              "prod_longterm",
+              "prod_eaccount",
+              "prod_funds",
+              "prod_mortgage",
+              "prod_pensions1",
+              "prod_loans",
+              "prod_taxes",
+              "prod_creditcard",
+              "prod_security",
+              "prod_homeaccount",
+              "prod_payroll",
+              "prod_pensions2",
+              "prod_directdebit")
+names(df) <- col_name
+
+vars_use <- c("user_id",
+              "user_employmenttype",
+              "user_sex",
+              "user_age",
+              "user_newuser",
+              "user_seniority",
+              "user_firstprimary",
+              "user_type",
+              "user_relationtype",
+              "user_residnce",
+              "user_foreigner",
+              "user_decease",
+              "user_active",
+              "user_income",
+              "user_segmentation")
+
+vars_prod <- names(df)[grep("prod_",names(df))]
+
+
+
+df.train <- df %>%
+  filter(modified_date < "2016-01-01") %>%
+  group_by(user_id) %>%
+  arrange(desc(modified_date)) %>%
+  do(head(.,1))
+  
+df.train.prod <- df %>%
+  filter(modified_date < "2016-01-01") %>%
+  group_by(user_id) %>%
+  summarise_at(vars(one_of(vars_prod)), max)
+
+df.train <- df.train %>%
+  left_join(df.train.prod, by = c("user_id" = "user_id"))
+
+save(df.train, file = "train.Rdata")
+
+df.val <- df %>% 
+  filter(modified_date >= "2016-01-01") %>%
+  group_by(user_id) %>%
+  arrange(desc(modified_date)) %>%
+  do(head(.,1))
+
+df.val.prod <- df %>%
+  filter(modified_date < "2016-01-01") %>%
+  group_by(user_id) %>%
+  summarise_at(vars(one_of(vars_prod)), max)
+
+df.val <- df.val %>%
+  left_join(df.val.prod, by = c("user_id" = "user_id"))
